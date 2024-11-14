@@ -1,0 +1,506 @@
+{
+    "last_directories": {
+        "apply_words": "/Users/nico/Movies/Vids",
+        "regex_application": "/Users/nico/Movies/Vids",
+        "conversion_folder": "/Volumes/NX",
+        "copy_structure": "/Volumes/NX",
+        "copy_structure_dest": "/Users/nico/Movies/X",
+        "copy_subfolder": "/Users/nico/Movies/X",
+        "copy_subfolder_dest": "/Volumes/NX"
+    },
+    "video_metadata": {},
+    "ignored_duplicates": {},
+    "video_formats": [
+        ".mp4",
+        ".mkv",
+        ".avi",
+        ".mov"
+    ],
+    "words_to_remove": [
+        {
+            "word": "480p",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "#Anal",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "ot-",
+            "action": "d",
+            "position": "d",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "ot ",
+            "action": "d",
+            "position": "d",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "720p",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "h264",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "-",
+            "action": "r",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": ".",
+            "action": "r",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "ot",
+            "action": "d",
+            "position": "d",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": ".",
+            "action": "d",
+            "position": "f",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "ManyVids",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "HD",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "COMPLETE",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "XXX",
+            "action": "d",
+            "position": "pp",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "mp4",
+            "action": "dd",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "WRB",
+            "action": "dd",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "PornHoarder",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "PornHoa",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "EPORNER",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "watermarked",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "appletv1",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "DVD9Rip",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "576p",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "x264",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "WEB DL",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "_",
+            "action": "r",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "FullHD",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "720x576",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "KLEENEX",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "NBQ",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "SD",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "MP4KLEENEX",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "[",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "]",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "kbps",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "FULL VIDEO link",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "FRENCH",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "WEB",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "Rip",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "Wawacity",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "4k",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "jacquieetmicheltv",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "xhamster com",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "xhamster",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "HQ",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "source",
+            "action": "d",
+            "position": "f",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "High Quality on Link",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "o",
+            "replace_with": " "
+        },
+        {
+            "word": "Full video Download",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "Download",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "spankbang",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "Watch",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "VOE Content Del",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "[RARBG]",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "Upscaled",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "[WEBDL]",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "High Quality on Link",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "\u2022",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "VHQ",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "X VIDEOS COM",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "XFREE",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "PornOne",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "appletv2",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "1Porn320p",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "2Porn320p",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "3Porn320p",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": "(",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        },
+        {
+            "word": ")",
+            "action": "d",
+            "position": "p",
+            "allow_mid_word": "n",
+            "replace_with": " "
+        }
+    ],
+    "regex_patterns": [
+        {
+            "pattern": "#\\w+",
+            "action": "d",
+            "replace_with": " ",
+            "position": "p",
+            "allow_mid_word": "n"
+        }
+    ]
+}
