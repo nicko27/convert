@@ -1,0 +1,30 @@
+{
+    "video": {
+        "formats": [".mp4", ".mkv", ".avi", ".mov"],
+        "conversion": {
+            "default_format": "mp4",
+            "default_crf": 23,
+            "default_bitrate": "800k",
+            "min_size_mb": 1024
+        },
+        "repair": {
+            "max_attempts": 3,
+            "backup_before_repair": true
+        }
+    },
+    "ui": {
+        "language": "fr",
+        "theme": "dark",
+        "progress_bar_style": "rich"
+    },
+    "paths": {
+        "temp_dir": "temp",
+        "output_dir": "output",
+        "log_file": "logs/video_manager.log"
+    },
+    "performance": {
+        "max_concurrent_processes": 2,
+        "cache_metadata": true,
+        "cache_duration_days": 7
+    }
+}

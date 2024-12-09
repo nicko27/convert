@@ -1,28 +1,30 @@
 from rich.table import Table
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import PathCompleter
-from config_manager import *
+from config_manager import config
 from duplicate_manager import *
 from ffmpeg_utils import *
-from file_utils import *
+from file_utils import file_manager
 from video_utils import *
 from rich.console import Console
 from pathlib import Path
 import os
 from regex_manager import *
+from layout import Layout
+from ui import ui
 
 console = Console()
 DEFAULT_IGNORE_KEYWORD = "cvt"  # Mot-clé par défaut pour ignorer les fichiers pendant la conversion
 
 def edit_video_formats():
     """Permet de modifier la liste des formats vidéo dans la configuration."""
-    current_formats = get_video_formats()
+    current_formats = config.get_video_formats()
     console.print(f"Formats vidéo actuels : {', '.join(current_formats)}")
     new_formats = prompt("Entrez les nouveaux formats vidéo séparés par des virgules (ex: .mp4, .mkv) : ")
     
     # Transforme la saisie utilisateur en liste et met à jour la configuration
     updated_formats = [fmt.strip().lower() for fmt in new_formats.split(",") if fmt.strip()]
-    set_video_formats(updated_formats)
+    config.set_video_formats(updated_formats)
     console.print(f"[bold green]Formats vidéo mis à jour : {', '.join(updated_formats)}[/bold green]")
 
 def select_file(prompt_text: str, default: str = "") -> str:
@@ -37,11 +39,11 @@ def select_file(prompt_text: str, default: str = "") -> str:
 
 def select_directory(prompt_text: str, function: str) -> str:
     """Demande un chemin de dossier pour une fonction spécifique avec le dernier dossier utilisé par défaut."""
-    default_directory = get_last_directory(function)
+    default_directory = config.get_last_directory(function)
     completer = PathCompleter(only_directories=True)
     directory = prompt(f"{prompt_text} (par défaut: [{default_directory}]): ", completer=completer) or default_directory
     if os.path.isdir(directory):
-        remember_directory(directory, function)
+        config.remember_directory(directory, function)
         return directory
     else:
         console.print(":x: [bold red]Le chemin n'est pas valide, veuillez réessayer.[/bold red]")
@@ -49,7 +51,7 @@ def select_directory(prompt_text: str, function: str) -> str:
 
 def rename_videos_in_directory(directory: str):
     """Renomme les vidéos d'un répertoire en fonction du titre dans les métadonnées."""
-    video_files = [f for f in Path(directory).rglob('*') if f.is_file() and f.suffix.lower() in get_video_formats()]
+    video_files = [f for f in Path(directory).rglob('*') if f.is_file() and f.suffix.lower() in config.get_video_formats()]
     for file_path in video_files:
         metadata = get_video_metadata(str(file_path))
         if metadata:
@@ -86,7 +88,7 @@ def convert_videos_in_folder():
     
     process_files_in_folder(
         directory=source,
-        formats=get_video_formats(),
+        formats=config.get_video_formats(),
         min_size_mb=min_size_mb,
         delete_larger_original=delete_larger_original,
         keyword=keyword
@@ -96,74 +98,182 @@ def display_menu():
     """Affiche le menu principal et gère la sélection de l'utilisateur."""
     while True:
         console.print("\n[bold yellow]=== Gestionnaire de Vidéos ===[/bold yellow]")
-        table = Table(show_header=True, header_style="bold magenta")
-        table.add_column("Option", style="dim")
-        table.add_column("Description")
-        table.add_row("1", "Convertir une vidéo")
-        table.add_row("2", "Convertir toutes les vidéos dans un dossier")
-        table.add_row("3", "Rechercher des doublons dans un dossier")
-        table.add_row("4", "Copier uniquement le contenu d'un sous-dossier sans son dossier racine")
-        table.add_row("5", "Copier uniquement la structure des dossiers sans les fichiers")
-        table.add_row("6", "Modifier les formats de fichiers vidéo")
-        table.add_row("7", "Renommer toutes les vidéos dans une arborescence")
-        table.add_row("8", "Gérer et appliquer les expressions régulières")
-        table.add_row("9", "Gérer les mots pour traitement des noms de fichiers")
-        table.add_row("10", "Appliquer la suppression ou l'ajout d'espace aux noms de fichiers")
-        table.add_row("11", "Quitter")
-        console.print(table)
-
-        choice = prompt("Choisissez une option [1-11]: ")
-
-        if choice == "1":
-            source = select_file("Entrez le chemin de la vidéo à convertir")
-            output_format = prompt("Entrez le format de sortie (ex: mp4, mkv) [par défaut: mp4]: ", default="mp4")
-            convert_file_action(source, output_format)
         
-        elif choice == "2":
-            convert_videos_in_folder()
-
-        elif choice == "3":
-            source = select_directory("Entrez le chemin du dossier à analyser pour les doublons", "duplicates")
-            reset_analysis = prompt("Ignorer les données précédentes et réinitialiser l'analyse ? (o/n): ").lower() == 'o'
-            threshold = float(prompt("Entrez le seuil de similarité (ex: 0.85 pour 85%) [par défaut: 0.85]: ", default="0.85"))
-            find_duplicates_in_folder(source, threshold, reset_analysis=reset_analysis)
-
-        elif choice == "4":
-            source = select_directory("Entrez le chemin du sous-dossier à copier sans son dossier racine", "copy_subfolder")
-            destination = select_directory("Entrez le dossier de destination", "copy_subfolder_dest")
-
-            # Demander confirmation pour la suppression après la copie
-            delete_after_copy = prompt("Voulez-vous supprimer les fichiers sources après la copie ? (o/n): ",default="o").lower() == 'o'
+        # Créer un layout pour une meilleure organisation
+        layout = Layout()
+        layout.split_column(
+            Layout(name="header"),
+            Layout(name="menu"),
+            Layout(name="footer")
+        )
+        
+        # En-tête avec statistiques
+        header = Table.grid(padding=1)
+        stats = file_manager.get_operation_stats()
+        header.add_row(
+            f"[cyan]Opérations totales:[/] {stats['total_operations']}",
+            f"[green]Taux de succès:[/] {stats['success_rate']:.1f}%",
+            f"[yellow]Taille traitée:[/] {ui.format_size(stats['total_size_processed'])}"
+        )
+        layout["header"].update(Panel(header, title="Statistiques", border_style="blue"))
+        
+        # Menu principal
+        menu_table = Table(show_header=True, header_style="bold magenta", expand=True)
+        menu_table.add_column("Option", style="dim", width=8)
+        menu_table.add_column("Description", width=40)
+        menu_table.add_column("Détails", width=30)
+        
+        menu_items = [
+            ("1", "Convertir une vidéo", "Conversion individuelle avec options"),
+            ("2", "Convertir un dossier", "Traitement par lot avec filtres"),
+            ("3", "Rechercher des doublons", "Analyse multi-critères"),
+            ("4", "Copier sous-dossier", "Sans dossier racine"),
+            ("5", "Copier structure", "Dossiers uniquement"),
+            ("6", "Formats vidéo", "Gérer les extensions"),
+            ("7", "Renommer vidéos", "Par métadonnées"),
+            ("8", "Expressions régulières", "Gestion avancée"),
+            ("9", "Mots-clés", "Traitement des noms"),
+            ("10", "Appliquer regex", "Aux noms de fichiers"),
+            ("11", "Quitter", "Sortir du programme")
+        ]
+        
+        for option, desc, details in menu_items:
+            menu_table.add_row(option, desc, f"[dim]{details}[/]")
+        
+        layout["menu"].update(Panel(menu_table, title="Menu Principal", border_style="magenta"))
+        
+        # Pied de page avec aide
+        footer = Table.grid(padding=1)
+        footer.add_row(
+            "[dim]Utilisez les numéros pour sélectionner une option[/]",
+            "[dim]Pressez Ctrl+C pour annuler une opération[/]"
+        )
+        layout["footer"].update(Panel(footer, title="Aide", border_style="green"))
+        
+        # Afficher le layout
+        console.print(layout)
+        
+        # Gérer la sélection
+        try:
+            choice = prompt("\nChoisissez une option [1-11]: ")
             
-            # Copier les fichiers sans inclure le dossier racine
-            copy_folder_contents(source, destination, False, delete_after_copy)
-
-        elif choice == "5":
-            source = select_directory("Entrez le chemin du dossier pour copier sa structure uniquement", "copy_structure")
-            destination = select_directory("Entrez le dossier de destination pour la structure", "copy_structure_dest")
-            copy_folder_structure(source, destination)
-
-        elif choice == "6":
-            edit_video_formats()
-
-        elif choice == "7":
-            directory = select_directory("Entrez le chemin de l'arborescence à analyser", "rename_videos")
-            rename_videos_in_directory(directory)
-        
-        elif choice == "8":
-            directory = select_directory("Entrez le dossier pour appliquer les expressions régulières", "regex_application")
-            manage_regex_patterns_and_analyze(directory)
-
-        elif choice == "9":
-            manage_words_to_remove()
-
-        elif choice == "10":
-            directory = select_directory("Entrez le dossier où appliquer la suppression des mots", "apply_words")
-            auto_mode = prompt("Souhaitez-vous activer le mode automatique pour appliquer les actions sur les mots trouvés ? (o/n): ", default="o").lower() == 'o'
-            apply_words_to_files(directory, auto_mode)
-
-        elif choice == "11":
-            console.print("[bold green]Au revoir ![/bold green]")
+            if choice == "1":
+                convert_single_video()
+            elif choice == "2":
+                convert_folder()
+            elif choice == "3":
+                search_duplicates()
+            elif choice == "4":
+                copy_subfolder()
+            elif choice == "5":
+                copy_structure()
+            elif choice == "6":
+                edit_video_formats()
+            elif choice == "7":
+                rename_videos()
+            elif choice == "8":
+                manage_regex()
+            elif choice == "9":
+                manage_keywords()
+            elif choice == "10":
+                apply_regex()
+            elif choice == "11":
+                if confirm_exit():
+                    break
+            else:
+                console.print("[bold red]Option invalide. Veuillez réessayer.[/]")
+                
+        except KeyboardInterrupt:
+            if confirm_exit():
+                break
+        except Exception as e:
+            console.print(f"[bold red]Erreur: {str(e)}[/]")
+            if confirm_continue():
+                continue
             break
-        else:
-            console.print("[bold red]Option invalide. Veuillez choisir une option valide.[/bold red]")
+
+def confirm_exit() -> bool:
+    """Demande confirmation avant de quitter."""
+    return prompt("Voulez-vous vraiment quitter ? (o/n): ").lower() == 'o'
+
+def confirm_continue() -> bool:
+    """Demande si l'utilisateur veut continuer après une erreur."""
+    return prompt("Voulez-vous continuer ? (o/n): ").lower() == 'o'
+
+def convert_single_video():
+    """Interface améliorée pour la conversion d'une seule vidéo."""
+    ui.show_header("Conversion de Vidéo", "Conversion d'un fichier unique avec options avancées")
+    
+    source = select_file("Entrez le chemin de la vidéo à convertir")
+    if not source:
+        return
+    
+    # Afficher les informations de la vidéo
+    info = get_video_info(source)
+    if info:
+        display_video_info(info)
+    
+    # Options de conversion
+    output_format = prompt("Format de sortie (ex: mp4, mkv) [mp4]: ", default="mp4")
+    quality = prompt("Qualité (1-31, plus bas = meilleure qualité) [23]: ", default="23")
+    try:
+        quality = int(quality)
+        if not 1 <= quality <= 31:
+            raise ValueError()
+    except ValueError:
+        ui.show_error("Qualité invalide, utilisation de la valeur par défaut (23)")
+        quality = 23
+    
+    # Options avancées
+    if prompt("Voulez-vous configurer les options avancées ? (o/n): ").lower() == 'o':
+        bitrate = prompt("Débit binaire (ex: 800k, 2M) [auto]: ")
+        resolution = prompt("Résolution (ex: 1920x1080) [originale]: ")
+        audio_bitrate = prompt("Débit audio (ex: 128k) [original]: ")
+    else:
+        bitrate = None
+        resolution = None
+        audio_bitrate = None
+    
+    # Confirmation
+    if not prompt("Voulez-vous lancer la conversion ? (o/n): ").lower() == 'o':
+        return
+    
+    # Lancer la conversion
+    success = convert_file_action(
+        source,
+        output_format,
+        crf=quality,
+        bitrate=bitrate,
+        resolution=resolution,
+        audio_bitrate=audio_bitrate
+    )
+    
+    if success:
+        ui.show_success("Conversion terminée avec succès !")
+    else:
+        ui.show_error("La conversion a échoué")
+
+def display_video_info(info: Dict):
+    """Affiche les informations d'une vidéo de manière formatée."""
+    table = Table(title="Informations de la Vidéo", show_header=False, title_style="bold cyan")
+    table.add_column("Propriété", style="green")
+    table.add_column("Valeur", style="yellow")
+    
+    info_map = {
+        "Durée": f"{info['duration']:.2f}s",
+        "Résolution": f"{info['resolution'][0]}x{info['resolution'][1]}",
+        "Images/s": f"{info['fps']:.2f}",
+        "Taille": ui.format_size(info['size']),
+        "Audio": "Oui" if info['has_audio'] else "Non"
+    }
+    
+    for prop, val in info_map.items():
+        table.add_row(prop, str(val))
+    
+    if 'quality_metrics' in info:
+        table.add_section()
+        table.add_row("Qualité", "")
+        for metric, value in info['quality_metrics'].items():
+            table.add_row(f"  {metric.title()}", f"{value:.2%}")
+    
+    console.print(table)

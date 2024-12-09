@@ -4,98 +4,278 @@ from pathlib import Path
 from rich.console import Console
 from prompt_toolkit import prompt
 from config_manager import load_json_data, save_json_data
+import json
+from datetime import datetime
+from rich.table import Table
 
 console = Console()
 
-def manage_regex_patterns_and_analyze(directory: str):
-    """
-    Gère les expressions régulières pour ajouter, supprimer, modifier, ou analyser les fichiers immédiatement
-    avec une expression sélectionnée.
-    """
-    data = load_json_data()
-    regex_patterns = data.get("regex_patterns", [])
+class RegexPattern:
+    """Classe pour gérer un pattern regex avec ses paramètres."""
+    def __init__(self, pattern: str, action: str = 'd', replace_with: str = " ",
+                 position: str = 'p', allow_mid_word: str = 'n', priority: int = 1,
+                 description: str = "", enabled: bool = True):
+        self.pattern = pattern
+        self.action = action
+        self.replace_with = replace_with
+        self.position = position
+        self.allow_mid_word = allow_mid_word
+        self.priority = priority
+        self.description = description
+        self.enabled = enabled
+        self.usage_count = 0
+        self.last_used = None
 
-    # Ensure regex_patterns is a list of dictionaries
-    regex_patterns = [
-        pattern if isinstance(pattern, dict) else {"pattern": pattern, "action": "d", "replace_with": " ", "position": "p", "allow_mid_word": "n"}
-        for pattern in regex_patterns
-    ]
+    def to_dict(self):
+        """Convertit l'objet en dictionnaire pour la sauvegarde."""
+        return {
+            "pattern": self.pattern,
+            "action": self.action,
+            "replace_with": self.replace_with,
+            "position": self.position,
+            "allow_mid_word": self.allow_mid_word,
+            "priority": self.priority,
+            "description": self.description,
+            "enabled": self.enabled,
+            "usage_count": self.usage_count,
+            "last_used": self.last_used
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        """Crée un objet RegexPattern à partir d'un dictionnaire."""
+        pattern = cls(
+            pattern=data["pattern"],
+            action=data.get("action", "d"),
+            replace_with=data.get("replace_with", " "),
+            position=data.get("position", "p"),
+            allow_mid_word=data.get("allow_mid_word", "n"),
+            priority=data.get("priority", 1),
+            description=data.get("description", ""),
+            enabled=data.get("enabled", True)
+        )
+        pattern.usage_count = data.get("usage_count", 0)
+        pattern.last_used = data.get("last_used")
+        return pattern
+
+    def get_compiled_pattern(self) -> str:
+        """Retourne le pattern compilé selon la position et les conditions de mot."""
+        if self.position == "d":
+            return rf"^{self.pattern}"
+        elif self.position == "f":
+            return rf"{self.pattern}$"
+        else:
+            return rf"\b{self.pattern}\b" if self.allow_mid_word == "n" else self.pattern
+
+    def apply_to_text(self, text: str) -> tuple[str, bool]:
+        """Applique le pattern au texte et retourne le résultat et si une modification a été faite."""
+        if not self.enabled:
+            return text, False
+
+        compiled_pattern = self.get_compiled_pattern()
+        original_text = text
+
+        if self.action == "d":
+            text = re.sub(compiled_pattern, "", text, flags=re.IGNORECASE)
+        elif self.action == "r":
+            text = re.sub(compiled_pattern, self.replace_with, text, flags=re.IGNORECASE)
+        elif self.action == "s":
+            text = re.sub(compiled_pattern, f"{self.pattern} ", text, flags=re.IGNORECASE)
+
+        was_modified = text != original_text
+        if was_modified:
+            self.usage_count += 1
+            self.last_used = datetime.now().isoformat()
+
+        return text.strip(), was_modified
+
+def manage_regex_patterns_and_analyze(directory: str):
+    """Gère les expressions régulières avec des fonctionnalités améliorées."""
+    data = load_json_data()
+    patterns = [RegexPattern.from_dict(p) if isinstance(p, dict) else 
+               RegexPattern(p) for p in data.get("regex_patterns", [])]
 
     while True:
-        console.print("[bold cyan]Gestion des expressions régulières :[/bold cyan]")
+        console.print("\n[bold cyan]Gestion des expressions régulières :[/bold cyan]")
         console.print("1. Ajouter une expression régulière")
         console.print("2. Supprimer une expression régulière")
         console.print("3. Modifier une expression régulière")
-        console.print("4. Appliquer toutes les expressions régulières sur les fichiers")
-        console.print("5. Quitter")
+        console.print("4. Appliquer les expressions régulières")
+        console.print("5. Voir les statistiques d'utilisation")
+        console.print("6. Tester une expression sur un texte")
+        console.print("7. Activer/Désactiver des expressions")
+        console.print("8. Gérer les priorités")
+        console.print("9. Exporter/Importer des patterns")
+        console.print("10. Quitter")
 
-        choice = prompt("Choisissez une option : ")
+        choice = prompt("\nChoisissez une option : ")
 
         if choice == "1":
-            new_pattern = prompt("Entrez la nouvelle expression régulière : ")
-            action = prompt("Entrez l'action ('d' pour supprimer, 'r' pour remplacer, 's' pour ajouter un espace) : ", default="d").lower()
-            replace_with = prompt("Entrez le mot de remplacement (laisser vide pour un espace) : ") if action == "r" else ""
-            position = prompt("Entrez la position ('d' pour début, 'f' pour fin, 'p' pour partout) : ", default="p").lower()
-            allow_mid_word = prompt("Autoriser en milieu de mot ? (o pour oui, n pour non) : ", default="n").lower()
-
-            regex_patterns.append({
-                "pattern": new_pattern,
-                "action": action,
-                "replace_with": replace_with or " ",
-                "position": position,
-                "allow_mid_word": allow_mid_word
-            })
-            console.print("[bold green]Expression ajoutée ![/bold green]")
-
-        elif choice == "2":
-            for i, pattern_info in enumerate(regex_patterns, start=1):
-                console.print(f"{i}. {pattern_info['pattern']}")
-            idx = int(prompt("Entrez le numéro de l'expression à supprimer : ")) - 1
-            if 0 <= idx < len(regex_patterns):
-                console.print(f"[bold red]Expression supprimée :[/bold red] {regex_patterns[idx]['pattern']}")
-                regex_patterns.pop(idx)
-
-        elif choice == "3":
-            for i, pattern_info in enumerate(regex_patterns, start=1):
-                console.print(f"{i}. {pattern_info['pattern']}")
-            idx = int(prompt("Entrez le numéro de l'expression à modifier : ")) - 1
-            if 0 <= idx < len(regex_patterns):
-                updated_pattern = prompt("Entrez la nouvelle expression : ")
-                action = prompt("Entrez l'action ('d' pour supprimer, 'r' pour remplacer, 's' pour ajouter un espace) : ", default="d").lower()
-                replace_with = prompt("Entrez le mot de remplacement (laisser vide pour un espace) : ") if action == "r" else ""
-                position = prompt("Entrez la position ('d' pour début, 'f' pour fin, 'p' pour partout) : ", default="p").lower()
-                allow_mid_word = prompt("Autoriser en milieu de mot ? (o pour oui, n pour non) : ", default="n").lower()
-
-                regex_patterns[idx].update({
-                    "pattern": updated_pattern,
-                    "action": action,
-                    "replace_with": replace_with or " ",
-                    "position": position,
-                    "allow_mid_word": allow_mid_word
-                })
-                console.print("[bold green]Expression modifiée ![/bold green]")
-
-        elif choice == "4":
-            auto_mode = prompt("Souhaitez-vous activer le mode automatique pour appliquer les actions sur les mots trouvés ? (o/n): ", default="o").lower() == 'o'
-            apply_regex_to_files(directory, regex_patterns,auto_mode)
+            pattern = RegexPattern(
+                pattern=prompt("Expression régulière : "),
+                action=prompt("Action (d/r/s) : ", default="d"),
+                replace_with=prompt("Remplacement : ") if prompt("Action (d/r/s) : ", default="d") == "r" else " ",
+                position=prompt("Position (d/f/p) : ", default="p"),
+                allow_mid_word=prompt("Milieu de mot (o/n) : ", default="n"),
+                priority=int(prompt("Priorité (1-10) : ", default="1")),
+                description=prompt("Description : ")
+            )
+            patterns.append(pattern)
+            console.print("[green]Pattern ajouté avec succès ![/green]")
 
         elif choice == "5":
+            show_pattern_statistics(patterns)
+
+        elif choice == "6":
+            test_text = prompt("Entrez le texte à tester : ")
+            test_patterns_on_text(patterns, test_text)
+
+        elif choice == "7":
+            manage_pattern_status(patterns)
+
+        elif choice == "8":
+            manage_pattern_priorities(patterns)
+
+        elif choice == "9":
+            export_import_patterns(patterns)
+
+        elif choice == "10":
             break
 
         else:
             console.print("[bold red]Choix invalide. Veuillez réessayer.[/bold red]")
 
-    data=load_json_data()
-    data["regex_patterns"] = regex_patterns
+    save_patterns(patterns)
+
+def show_pattern_statistics(patterns: list[RegexPattern]):
+    """Affiche les statistiques d'utilisation des patterns."""
+    console.print("\n[bold cyan]Statistiques d'utilisation :[/bold cyan]")
+    
+    sorted_patterns = sorted(patterns, key=lambda p: p.usage_count, reverse=True)
+    
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Pattern")
+    table.add_column("Utilisations")
+    table.add_column("Dernière utilisation")
+    table.add_column("Statut")
+    
+    for p in sorted_patterns:
+        last_used = "Jamais" if not p.last_used else p.last_used.split('T')[0]
+        status = "[green]Actif[/green]" if p.enabled else "[red]Inactif[/red]"
+        table.add_row(p.pattern, str(p.usage_count), last_used, status)
+    
+    console.print(table)
+
+def test_patterns_on_text(patterns: list[RegexPattern], test_text: str):
+    """Teste l'application des patterns sur un texte donné."""
+    console.print("\n[bold cyan]Test des patterns :[/bold cyan]")
+    
+    current_text = test_text
+    for p in sorted(patterns, key=lambda x: x.priority, reverse=True):
+        if not p.enabled:
+            continue
+            
+        modified_text, was_modified = p.apply_to_text(current_text)
+        if was_modified:
+            console.print(f"\nPattern : [yellow]{p.pattern}[/yellow]")
+            console.print(f"Avant  : [red]{current_text}[/red]")
+            console.print(f"Après  : [green]{modified_text}[/green]")
+            current_text = modified_text
+
+def manage_pattern_status(patterns: list[RegexPattern]):
+    """Gère l'activation/désactivation des patterns."""
+    while True:
+        console.print("\n[bold cyan]Statut des patterns :[/bold cyan]")
+        for i, p in enumerate(patterns, 1):
+            status = "[green]Actif[/green]" if p.enabled else "[red]Inactif[/red]"
+            console.print(f"{i}. {p.pattern} - {status}")
+        
+        choice = prompt("\nNuméro du pattern à modifier (q pour quitter) : ")
+        if choice.lower() == 'q':
+            break
+            
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(patterns):
+                patterns[idx].enabled = not patterns[idx].enabled
+                status = "activé" if patterns[idx].enabled else "désactivé"
+                console.print(f"[green]Pattern {patterns[idx].pattern} {status}[/green]")
+        except ValueError:
+            console.print("[red]Entrée invalide[/red]")
+
+def manage_pattern_priorities(patterns: list[RegexPattern]):
+    """Gère les priorités des patterns."""
+    while True:
+        console.print("\n[bold cyan]Priorités des patterns :[/bold cyan]")
+        for i, p in enumerate(patterns, 1):
+            console.print(f"{i}. {p.pattern} - Priorité : {p.priority}")
+        
+        choice = prompt("\nNuméro du pattern à modifier (q pour quitter) : ")
+        if choice.lower() == 'q':
+            break
+            
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(patterns):
+                new_priority = int(prompt(f"Nouvelle priorité pour {patterns[idx].pattern} (1-10) : "))
+                if 1 <= new_priority <= 10:
+                    patterns[idx].priority = new_priority
+                    console.print("[green]Priorité mise à jour[/green]")
+                else:
+                    console.print("[red]La priorité doit être entre 1 et 10[/red]")
+        except ValueError:
+            console.print("[red]Entrée invalide[/red]")
+
+def export_import_patterns(patterns: list[RegexPattern]):
+    """Gère l'export et l'import des patterns."""
+    while True:
+        console.print("\n[bold cyan]Export/Import des patterns :[/bold cyan]")
+        console.print("1. Exporter les patterns")
+        console.print("2. Importer des patterns")
+        console.print("3. Retour")
+        
+        choice = prompt("\nChoisissez une option : ")
+        
+        if choice == "1":
+            export_file = prompt("Nom du fichier d'export : ")
+            patterns_data = [p.to_dict() for p in patterns]
+            with open(export_file, 'w') as f:
+                json.dump(patterns_data, f, indent=2)
+            console.print(f"[green]Patterns exportés vers {export_file}[/green]")
+            
+        elif choice == "2":
+            import_file = prompt("Nom du fichier à importer : ")
+            try:
+                with open(import_file, 'r') as f:
+                    imported_data = json.load(f)
+                imported_patterns = [RegexPattern.from_dict(p) for p in imported_data]
+                
+                mode = prompt("Mode d'import (f pour fusionner, r pour remplacer) : ").lower()
+                if mode == 'f':
+                    patterns.extend(imported_patterns)
+                elif mode == 'r':
+                    patterns.clear()
+                    patterns.extend(imported_patterns)
+                    
+                console.print("[green]Patterns importés avec succès[/green]")
+            except Exception as e:
+                console.print(f"[red]Erreur lors de l'import : {e}[/red]")
+                
+        elif choice == "3":
+            break
+
+def save_patterns(patterns: list[RegexPattern]):
+    data = load_json_data()
+    data["regex_patterns"] = [p.to_dict() for p in patterns]
     save_json_data(data)
 
-def apply_regex_to_files(directory: str, regex_patterns: list, auto_mode: bool):
+def apply_regex_to_files(directory: str, patterns: list[RegexPattern], auto_mode: bool):
     """
     Applique les expressions régulières fournies pour modifier les noms de fichiers dans le répertoire.
     Sélectionne la regex qui réduit le plus la longueur du nom et continue jusqu'à ce qu'il n'y ait plus de réduction.
     
     :param directory: Le répertoire dans lequel appliquer les regex.
-    :param regex_patterns: Liste de dictionnaires de regex avec action et paramètres.
+    :param patterns: Liste de RegexPattern.
     :param auto_mode: Si True, applique les modifications automatiquement sans confirmation.
     """
     files = [f for f in Path(directory).rglob('*') if f.is_file() and not any(p.startswith('.') for p in f.parts)]
@@ -109,39 +289,21 @@ def apply_regex_to_files(directory: str, regex_patterns: list, auto_mode: bool):
             max_reduction = 0
 
             # Try each pattern and calculate reduction in length
-            for pattern_info in regex_patterns:
-                pattern = pattern_info.get("pattern", "")
-                action = pattern_info.get("action", "d")
-                replace_with = pattern_info.get("replace_with", " ")
-                position = pattern_info.get("position", "p")
-                allow_mid_word = pattern_info.get("allow_mid_word", "n") == "o"
+            for pattern in patterns:
+                if not pattern.enabled:
+                    continue
 
-                # Define the regex based on position and word boundary conditions
-                if position == "d":
-                    regex = rf"^{pattern}"
-                elif position == "f":
-                    regex = rf"{pattern}$"
-                else:
-                    regex = rf"\b{pattern}\b" if not allow_mid_word else pattern
-
-                # Apply the pattern to see the effect
-                if action == "d":
-                    test_name = re.sub(regex, "", modified_name, flags=re.IGNORECASE).strip()
-                elif action == "r":
-                    test_name = re.sub(regex, replace_with, modified_name, flags=re.IGNORECASE).strip()
-                elif action == "s":
-                    test_name = re.sub(regex, f"{pattern} ", modified_name, flags=re.IGNORECASE).strip()
-                
-                reduction = len(modified_name) - len(test_name)
+                modified_text, was_modified = pattern.apply_to_text(modified_name)
+                reduction = len(modified_name) - len(modified_text)
 
                 # Choose the pattern that maximizes reduction
                 if reduction > max_reduction:
                     max_reduction = reduction
-                    best_match = (pattern_info, test_name)
+                    best_match = modified_text
 
             # If a reduction was made, apply it
-            if best_match and len(best_match[1]) > 0:
-                modified_name = best_match[1]
+            if best_match and len(best_match) > 0:
+                modified_name = best_match
             else:
                 break
 

@@ -3,219 +3,482 @@ from PIL import Image
 import imagehash
 import librosa
 import numpy as np
-from rich.console import Console
 from scipy.spatial.distance import hamming
-
+import json
+import os
+from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from send2trash import send2trash
 from pathlib import Path
-from rich.console import Console
-from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
-from prompt_toolkit import prompt
-from config_manager import *
-from video_utils import *
+from datetime import datetime
+from typing import Dict, List, Tuple, Optional, Any
+from config_manager import config
+from video_utils import get_audio_signature
+from ui_manager import ui
+from ffmpeg_utils import repair_video
 
-console = Console()
-
-def similarity_score(video1: dict, video2: dict, threshold: float) -> bool:
-    """Calcule un score de similarité entre deux vidéos basé sur plusieurs critères."""
-    if not video1 or not video2:
-        return 0
-
-    # Comparaison de durée
-    duration_similarity = 1 - abs(video1["duration"] - video2["duration"]) / max(video1["duration"], video2["duration"])
-
-    # Comparaison de résolution
-    resolution_similarity = 1 if video1["resolution"] == video2["resolution"] else 0
-
-    # Comparaison des hash de frames avec la distance de Hamming
-    hashes1 = [imagehash.hex_to_hash(h) if isinstance(h, str) else h for h in video1["hashes"]]
-    hashes2 = [imagehash.hex_to_hash(h) if isinstance(h, str) else h for h in video2["hashes"]]
+class DuplicateReason:
+    """Classe pour stocker et expliquer les raisons de similarité entre deux vidéos."""
     
-    hash_similarities = [
-        1 - hamming(h1.hash.flatten(), h2.hash.flatten())
-        for h1, h2 in zip(hashes1, hashes2)
-    ]
-    hash_similarity = sum(hash_similarities) / len(hash_similarities)
-
-    # Comparaison de la signature audio (cosine similarity)
-    if video1.get("audio_signature") is not None and video2.get("audio_signature") is not None:
-        audio_similarity = np.dot(video1["audio_signature"], video2["audio_signature"]) / (
-            np.linalg.norm(video1["audio_signature"]) * np.linalg.norm(video2["audio_signature"])
-        )
-    else:
-        audio_similarity = 0
-
-    # Calcul du score global
-    overall_score = (0.4 * duration_similarity + 0.2 * resolution_similarity +
-                     0.3 * hash_similarity + 0.1 * audio_similarity)
+    def __init__(self):
+        self.reasons: List[str] = []
+        self.scores: Dict[str, float] = {}
+        self.total_score: float = 0.0
     
-    return overall_score >= threshold
-
-
-def get_video_infos(file_path: str) -> dict:
-    """Retourne les métadonnées de la vidéo : durée, résolution, hash de frames multiples et signature audio."""
-    try:
-        with VideoFileClip(file_path) as video:
-            duration = video.duration
-            resolution = (video.w, video.h)
-            fps = video.fps
-            
-            # Obtenir les hash de frames (début, milieu, fin)
-            hashes = []
-            for t in [0.1 * duration, 0.5 * duration, 0.9 * duration]:  # Prendre les frames à 10%, 50%, 90%
-                frame = video.get_frame(t)
-                frame_hash = imagehash.average_hash(Image.fromarray(frame))
-                hashes.append(frame_hash)
-            
-            # Générer la signature audio
-            audio_signature = get_audio_signature(file_path) if video.audio else None
-            
-            return {
-                "duration": duration,
-                "resolution": resolution,
-                "fps": fps,
-                "hashes": hashes,
-                "audio_signature": audio_signature
-            }
-    except Exception as e:
-        console.print(f"[bold red]Erreur lors de l'analyse de {file_path} : {e}[/bold red]")
-        return None
-
-def get_audio_signature(file_path: str) -> np.ndarray:
-    """Génère une signature audio pour un fichier vidéo, retourne un vecteur de caractéristiques."""
-    try:
-        y, sr = librosa.load(file_path, sr=22050, mono=True, duration=30)  # Charger les 30 premières secondes
-        return librosa.feature.mfcc(y=y, sr=sr).mean(axis=1)  # MFCC moyen pour signature
-    except Exception as e:
-        console.print(f"[bold red]Erreur lors de la génération de la signature audio pour {file_path} : {e}[/bold red]")
-        return None
-    
-
-
-
-def find_duplicates_in_folder(directory: str, threshold: float, timecode: float = 60.0, reset_analysis: bool = False):
-    """
-    Recherche et gère les doublons de vidéos avec barre de progression, gestion des erreurs et enregistrement des métadonnées.
-    
-    :param directory: Chemin du dossier à analyser pour les doublons.
-    :param threshold: Seuil de similarité pour considérer deux vidéos comme doublons.
-    :param timecode: Timecode de départ pour les captures d'images en secondes, incrémenté de 60s par défaut.
-    :param reset_analysis: Permet de réinitialiser l'analyse des doublons.
-    """
-    remember_directory(directory, "duplicates")
-    ignored_duplicates = load_ignored_duplicates()
-    metadata_cache = load_json_data().get("video_metadata", {})
-
-    if reset_analysis:
-        metadata_cache = {}
-        ignored_duplicates = {}
-        console.print("[bold red]Réinitialisation des données d'analyse précédentes.[/bold red]")
-
-    video_files = [f for f in Path(directory).rglob('*') if f.is_file() and f.suffix.lower() in get_video_formats()]
-    video_metadata = {}
-
-    with Progress(
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeRemainingColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Analyse des vidéos", total=len(video_files))
-
-        for video_file in video_files:
-            video_path_str = str(video_file)
-            if video_path_str in metadata_cache:
-                console.print(f"[bold green]Utilisation du cache pour : {video_file}[/bold green]")
-                video_metadata[video_path_str] = metadata_cache[video_path_str]
-            else:
-                console.print(f"Traitement de : [bold cyan]{video_file}[/bold cyan]")
-                metadata = get_video_infos(video_path_str)
-                if metadata is not None:
-                    metadata["hashes"] = [str(h) for h in metadata["hashes"]]
-                    video_metadata[video_path_str] = metadata
-                    metadata_cache[video_path_str] = metadata
-                else:
-                    console.print(f"[bold red]Impossible de lire les métadonnées pour {video_file}, fichier ignoré.[/bold red]")
-            progress.update(task, advance=1)
-
-    save_json_data({"video_metadata": metadata_cache})
-
-    potential_duplicates = []
-    visited = set()
-
-    for video1_path, meta1 in video_metadata.items():
-        if video1_path in visited or (meta1["duration"], meta1["hashes"]) in ignored_duplicates.get(directory, []):
-            continue
-        duplicates = [video1_path]
-        for video2_path, meta2 in video_metadata.items():
-            if video1_path != video2_path and video2_path not in visited:
-                score = similarity_score(meta1, meta2, threshold)
-                if score:
-                    duplicates.append(video2_path)
-                    visited.add(video2_path)
-        if len(duplicates) > 1:
-            potential_duplicates.append(duplicates)
-
-    space_saved = 0
-    total_duplicates = len(potential_duplicates)  # Nombre total de groupes de doublons trouvés
-
-    for idx, duplicates in enumerate(potential_duplicates, start=1):
-        console.print(f"\n[bold yellow]Doublons détectés ({idx}/{total_duplicates}) :[/bold yellow]")  # Indicateur de progression
-        for i, path in enumerate(duplicates, start=1):
-            metadata = video_metadata[path]
-            file_size = Path(path).stat().st_size / (1024 * 1024)
-            file_size_str = f"{file_size:.2f} MB" if file_size < 1024 else f"{file_size / 1024:.2f} GB"
-            console.print(f"{i}. {path} - Durée: {metadata['duration']}s - Taille: {file_size_str}")
-
-        choice = prompt(
-            "Entrez le numéro du fichier à conserver (1, 2, ...), s (skip), i (ignore), q (quitter), v (voir autres images), ou y (afficher images) : "
-        ).lower()
-
-        if choice == "y":
-            show_images(duplicates, timecode)
-            choice = prompt(
-                "Entrez le numéro du fichier à conserver (1, 2, ...), s (skip), i (ignore), q (quitter), v (voir autres images) : "
-            ).lower()
-
-        if choice.isdigit() and 1 <= int(choice) <= len(duplicates):
-            to_keep = duplicates[int(choice) - 1]
-            for path in duplicates:
-                if path != to_keep:
-                    file_size = Path(path).stat().st_size
-                    send2trash(path)
-                    space_saved += file_size
-                    console.print(f"[bold red]Fichier déplacé dans la corbeille : {path}[/bold red]")
+    def add_reason(self, name: str, score: float, details: Optional[str] = None) -> None:
+        """
+        Ajoute une raison de similarité avec son score.
         
-        elif choice == "s":
-            console.print("[bold yellow]Aucune action prise pour ce groupe.[/bold yellow]")
-        
-        elif choice == "i":
-            # Ajout direct de `duration` et de `hashes` dans `ignored_duplicates`
-            ignored_duplicates.setdefault(directory, []).append(
-                (video_metadata[duplicates[0]]["duration"], video_metadata[duplicates[0]]["hashes"])
-            )
-            console.print("[bold yellow]Groupe ignoré.[/bold yellow]")
-
-        elif choice == "q":
-            console.print("[bold yellow]Retour au menu principal...[/bold yellow]")
-            break
-
-        elif choice == "v":
-            timecode += 60  # Augmenter le timecode de 60s pour voir d'autres images
-            show_images(duplicates, timecode)
-
+        Args:
+            name: Nom de la métrique de comparaison
+            score: Score de similarité (entre 0 et 1)
+            details: Détails optionnels sur la comparaison
+        """
+        self.scores[name] = score
+        if details:
+            self.reasons.append(f"{name} ({score:.1%}): {details}")
         else:
-            console.print("[bold red]Choix invalide. Veuillez réessayer.[/bold red]")
+            self.reasons.append(f"{name}: {score:.1%}")
+        self.total_score = sum(self.scores.values()) / len(self.scores)
+    
+    def get_summary(self) -> str:
+        """Retourne un résumé des raisons de similarité."""
+        if not self.reasons:
+            return "Aucune raison de similarité"
+        return "\n".join([f"- {reason}" for reason in self.reasons])
+    
+    def get_total_score(self) -> float:
+        """Retourne le score total de similarité."""
+        return self.total_score
 
-    save_ignored_duplicates(ignored_duplicates)
+class VideoInfo:
+    """Classe pour stocker et gérer les informations d'une vidéo."""
+    
+    def __init__(self, file_path: str):
+        """
+        Initialise une nouvelle instance de VideoInfo.
+        
+        Args:
+            file_path: Chemin vers le fichier vidéo
+        """
+        self.file_path = str(Path(file_path))
+        self.info: Dict[str, Any] = {}
+        self.is_corrupted: bool = False
+        self.is_repaired: bool = False
+        self.repair_path: Optional[str] = None
+        self.error: Optional[str] = None
+    
+    def analyze(self, metadata_cache: Optional[Dict] = None, try_repair: bool = False) -> bool:
+        """
+        Analyse la vidéo et stocke ses informations.
+        
+        Args:
+            metadata_cache: Cache optionnel des métadonnées
+            try_repair: Si True, tente de réparer la vidéo si elle est corrompue
+            
+        Returns:
+            True si l'analyse a réussi, False sinon
+        """
+        try:
+            # Vérifier le cache
+            if metadata_cache and self.file_path in metadata_cache:
+                cached_data = metadata_cache[self.file_path]
+                # Vérifier si les données du cache sont toujours valides
+                if self._is_cache_valid(cached_data):
+                    self.info = cached_data
+                    return True
+            
+            file_path = Path(self.file_path)
+            if not file_path.exists():
+                raise FileNotFoundError(f"Le fichier n'existe pas : {self.file_path}")
+            
+            # Extraire les métadonnées de base
+            self._extract_basic_metadata(file_path)
+            
+            # Analyser le contenu vidéo
+            with VideoFileClip(self.file_path) as video:
+                self._analyze_video_content(video)
+                
+                # Analyser l'audio si présent
+                if video.audio:
+                    self._analyze_audio_content()
+            
+            # Mettre en cache les résultats
+            if metadata_cache is not None:
+                metadata_cache[self.file_path] = self.info
+            
+            return True
+            
+        except Exception as e:
+            self._handle_analysis_error(e, try_repair)
+            return False
 
-    space_saved_mb = space_saved / (1024 * 1024)
-    console.print(f"[bold green]Espace total libéré : {space_saved_mb:.2f} Mo[/bold green]")
+    def _is_cache_valid(self, cached_data: Dict) -> bool:
+        """Vérifie si les données en cache sont toujours valides."""
+        try:
+            file_stats = Path(self.file_path).stat()
+            return (
+                cached_data.get("file_size") == file_stats.st_size and
+                cached_data.get("modification_time") == file_stats.st_mtime
+            )
+        except Exception:
+            return False
 
-def show_images(duplicates, timecode):
-    """Affiche des images de chaque vidéo à un timestamp spécifique pour comparaison visuelle."""
+    def _extract_basic_metadata(self, file_path: Path) -> None:
+        """Extrait les métadonnées de base du fichier."""
+        stats = file_path.stat()
+        self.info.update({
+            "file_size": stats.st_size,
+            "creation_time": stats.st_ctime,
+            "modification_time": stats.st_mtime,
+            "last_analyzed": datetime.now().isoformat()
+        })
+
+    def _analyze_video_content(self, video: VideoFileClip) -> None:
+        """Analyse le contenu de la vidéo."""
+        if video.duration <= 0:
+            raise ValueError("La durée de la vidéo est invalide")
+        
+        self.info.update({
+            "duration": video.duration,
+            "resolution": (video.w, video.h),
+            "fps": video.fps,
+            "has_audio": video.audio is not None,
+            "frame_count": int(video.duration * video.fps)
+        })
+        
+        # Extraire des frames à des moments clés
+        self._extract_key_frames(video)
+        
+        # Analyser les codecs
+        try:
+            self.info["codec_info"] = video.reader.infos
+        except Exception as e:
+            ui.show_warning(f"Impossible de récupérer les infos codec : {e}")
+            self.info["codec_info"] = {}
+
+    def _extract_key_frames(self, video: VideoFileClip) -> None:
+        """Extrait et analyse les frames clés de la vidéo."""
+        frame_times = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0]
+        self.info["hashes"] = []
+        self.info["scene_changes"] = []
+        last_frame = None
+        
+        for t in [p * video.duration for p in frame_times]:
+            try:
+                frame = video.get_frame(t)
+                frame_hash = str(imagehash.average_hash(Image.fromarray(frame)))
+                self.info["hashes"].append(frame_hash)
+                
+                # Détecter les changements de scène
+                if last_frame is not None:
+                    diff = np.mean(np.abs(frame - last_frame))
+                    if diff > 50:  # Seuil arbitraire pour les changements de scène
+                        self.info["scene_changes"].append(t)
+                last_frame = frame
+                
+            except Exception as e:
+                ui.show_warning(f"Erreur lors de l'extraction de la frame à {t}s : {e}")
+
+    def _analyze_audio_content(self) -> None:
+        """Analyse le contenu audio de la vidéo."""
+        try:
+            audio_sig = get_audio_signature(self.file_path)
+            if isinstance(audio_sig, np.ndarray):
+                self.info["audio_signature"] = audio_sig.tolist()
+                
+                # Analyser les caractéristiques audio
+                y, sr = librosa.load(self.file_path, duration=30.0)
+                self.info["audio_features"] = {
+                    "tempo": float(librosa.beat.tempo(y=y, sr=sr)[0]),
+                    "rms_energy": float(np.mean(librosa.feature.rms(y=y))),
+                    "zero_crossing_rate": float(np.mean(librosa.feature.zero_crossing_rate(y=y)))
+                }
+        except Exception as e:
+            ui.show_warning(f"Erreur lors de l'extraction audio : {e}")
+            self.info["audio_signature"] = None
+            self.info["audio_features"] = {}
+
+    def _handle_analysis_error(self, error: Exception, try_repair: bool) -> None:
+        """Gère les erreurs d'analyse."""
+        self.is_corrupted = True
+        self.error = str(error)
+        ui.show_error(f"Erreur lors de l'analyse de {os.path.basename(self.file_path)} : {error}")
+        
+        if try_repair:
+            self._try_repair()
+
+    def _try_repair(self) -> bool:
+        """
+        Tente de réparer la vidéo si elle est corrompue.
+        
+        Returns:
+            True si la réparation a réussi, False sinon
+        """
+        ui.show_warning(f"Tentative de réparation de : {os.path.basename(self.file_path)}")
+        ui.show_info(f"Erreur originale : {self.error}")
+        
+        success, result = repair_video(self.file_path)
+        
+        if success and result:
+            self.is_repaired = True
+            self.repair_path = result
+            ui.show_success("Réparation réussie !")
+            
+            # Analyser le fichier réparé
+            original_path = self.file_path
+            self.file_path = result
+            success = self.analyze(try_repair=False)
+            self.file_path = original_path
+            
+            if success:
+                self.info["repaired"] = True
+                self.info["repaired_path"] = result
+                return True
+        else:
+            ui.show_error("La réparation a échoué")
+        
+        return False
+    
+    def get_display_info(self) -> Dict[str, Any]:
+        """
+        Retourne les informations formatées pour l'affichage.
+        
+        Returns:
+            Dictionnaire des informations formatées
+        """
+        if not self.info:
+            return {
+                'name': os.path.basename(self.file_path),
+                'error': self.error or "Pas d'informations disponibles"
+            }
+        
+        return {
+            'name': os.path.basename(self.file_path),
+            'size': self.info['file_size'],
+            'duration': round(self.info['duration'], 2),
+            'resolution': f"{self.info['resolution'][0]}x{self.info['resolution'][1]}",
+            'fps': round(self.info['fps'], 2),
+            'codec': self.info.get('codec_info', {}).get('codec_name', 'N/A'),
+            'bitrate': self.info.get('codec_info', {}).get('bit_rate', 'N/A'),
+            'has_audio': self.info.get('has_audio', False),
+            'creation_time': datetime.fromtimestamp(self.info['creation_time']).strftime('%Y-%m-%d %H:%M:%S'),
+            'is_repaired': self.is_repaired,
+            'repair_path': self.repair_path if self.is_repaired else None
+        }
+
+def compare_videos(video1: VideoInfo, video2: VideoInfo, threshold: float = 0.85) -> Tuple[bool, DuplicateReason]:
+    """
+    Compare deux vidéos et retourne si elles sont similaires avec les raisons détaillées.
+    
+    Args:
+        video1: Première vidéo à comparer
+        video2: Deuxième vidéo à comparer
+        threshold: Seuil de similarité (entre 0 et 1)
+        
+    Returns:
+        Tuple contenant un booléen (True si similaires) et les raisons de similarité
+    """
+    reason = DuplicateReason()
+    
+    # Vérification des informations
+    if not video1.info or not video2.info:
+        return False, reason
+    
+    # Vérification rapide de la taille
+    size_ratio = abs(video1.info["file_size"] - video2.info["file_size"]) / max(video1.info["file_size"], video2.info["file_size"])
+    if size_ratio < 0.01:
+        reason.add_reason("Taille identique", 1.0, "Les fichiers ont exactement la même taille")
+        return True, reason
+    
+    # Comparaison de durée (20% du score)
+    duration_diff = abs(video1.info["duration"] - video2.info["duration"])
+    duration_score = max(0, 1 - (duration_diff / max(video1.info["duration"], video2.info["duration"])))
+    reason.add_reason("Durée", duration_score, f"Différence de {duration_diff:.1f} secondes")
+    
+    # Comparaison des frames (40% du score)
+    if not video1.info.get("hashes") or not video2.info.get("hashes"):
+        reason.add_reason("Contenu visuel", 0.0, "Impossible de comparer les frames")
+        frame_score = 0.0
+    else:
+        hash_similarities = []
+        for h1, h2 in zip(video1.info["hashes"], video2.info["hashes"]):
+            try:
+                hash1 = imagehash.hex_to_hash(h1) if isinstance(h1, str) else h1
+                hash2 = imagehash.hex_to_hash(h2) if isinstance(h2, str) else h2
+                similarity = 1 - hamming(hash1.hash.flatten(), hash2.hash.flatten())
+                hash_similarities.append(similarity)
+            except Exception as e:
+                ui.show_warning(f"Erreur lors de la comparaison des hashes : {e}")
+        
+        frame_score = sum(hash_similarities) / len(hash_similarities) if hash_similarities else 0.0
+        reason.add_reason("Contenu visuel", frame_score, f"Similarité des images : {frame_score:.1%}")
+    
+    # Comparaison audio (40% du score)
+    if not video1.info.get("audio_signature") or not video2.info.get("audio_signature"):
+        reason.add_reason("Audio", 0.0, "Pas de piste audio dans au moins une des vidéos")
+        audio_sim = 0.0
+    else:
+        try:
+            audio_sim = np.dot(video1.info["audio_signature"], video2.info["audio_signature"]) / (
+                np.linalg.norm(video1.info["audio_signature"]) * np.linalg.norm(video2.info["audio_signature"])
+            )
+            reason.add_reason("Audio", audio_sim, f"Similarité audio : {audio_sim:.1%}")
+        except Exception as e:
+            ui.show_warning(f"Erreur lors de la comparaison audio : {e}")
+            audio_sim = 0.0
+            reason.add_reason("Audio", 0.0, f"Erreur de comparaison : {e}")
+    
+    # Calcul du score final pondéré
+    final_score = (
+        0.2 * duration_score +  # Durée : 20%
+        0.4 * frame_score +     # Contenu visuel : 40%
+        0.4 * audio_sim         # Audio : 40%
+    )
+    
+    reason.total_score = final_score
+    return final_score >= threshold, reason
+
+def find_duplicates_in_folder(directory: str, threshold: float = 0.85, timecode: float = 60.0,
+                            reset_analysis: bool = False, try_repair: bool = False):
+    """Recherche et gère les doublons de vidéos avec une interface utilisateur améliorée."""
+    
+    ignored_duplicates = load_ignored_duplicates()
+    metadata_cache = {} if reset_analysis else load_metadata_cache()
+    
+    stats = {
+        'total': 0,
+        'analyzed': 0,
+        'corrupted': 0,
+        'repaired': 0,
+        'failed': 0,
+        'space_saved': 0,
+        'errors': []
+    }
+    
+    ui.show_header("Recherche de doublons vidéo", f"Dossier : {directory}")
+    
+    # Récupérer la liste des fichiers vidéo
+    video_files = []
+    with ui.show_progress(total=100) as (progress, task):
+        for root, _, files in os.walk(directory):
+            for file in files:
+                if any(file.lower().endswith(ext) for ext in get_video_formats()):
+                    video_files.append(os.path.join(root, file))
+            progress.update(task, advance=5)  # Mise à jour progressive
+    
+    if not video_files:
+        ui.show_warning(f"Aucun fichier vidéo trouvé dans {directory}")
+        return
+    
+    stats['total'] = len(video_files)
+    ui.show_info(f"Fichiers vidéo trouvés : {len(video_files)}")
+    
+    # Analyser les fichiers
+    videos = {}
+    with ui.show_progress(total=len(video_files)) as (progress, task):
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            futures = []
+            for file_path in video_files:
+                video = VideoInfo(file_path)
+                futures.append(executor.submit(video.analyze, metadata_cache, try_repair))
+                videos[file_path] = video
+            
+            for future in futures:
+                try:
+                    success = future.result()
+                    if success:
+                        stats['analyzed'] += 1
+                    else:
+                        stats['corrupted'] += 1
+                except Exception as e:
+                    stats['errors'].append(str(e))
+                    stats['failed'] += 1
+                progress.update(task, advance=1)
+    
+    # Sauvegarder le cache des métadonnées
+    save_metadata_cache({path: video.info for path, video in videos.items() if not video.is_corrupted})
+    
+    if not any(not v.is_corrupted for v in videos.values()):
+        ui.show_error("Aucun fichier n'a pu être analysé correctement")
+        return
+    
+    # Chercher les doublons
+    duplicates = []
+    with ui.show_progress(total=len(videos)) as (progress, task):
+        video_items = list(videos.items())
+        for i, (path1, video1) in enumerate(video_items):
+            if video1.is_corrupted:
+                continue
+            for path2, video2 in video_items[i + 1:]:
+                if video2.is_corrupted:
+                    continue
+                if (path1, path2) not in ignored_duplicates:
+                    is_duplicate, reason = compare_videos(video1, video2, threshold)
+                    if is_duplicate:
+                        duplicates.append((path1, path2, reason))
+            progress.update(task, advance=1)
+    
+    if duplicates:
+        ui.show_info(f"\nDoublons trouvés : {len(duplicates)} paires")
+        total_space = 0
+        
+        for file1, file2, reason in duplicates:
+            video1 = videos[file1]
+            video2 = videos[file2]
+            
+            # Afficher la comparaison détaillée
+            ui.show_file_comparison(
+                video1.get_display_info(),
+                video2.get_display_info()
+            )
+            
+            # Afficher les raisons de similarité
+            ui.show_info("\nRaisons de similarité :")
+            ui.show_info(reason.get_summary())
+            
+            # Suggérer automatiquement le fichier à supprimer
+            size1, size2 = video1.info['file_size'], video2.info['file_size']
+            bigger_file = file1 if size1 > size2 else file2
+            smaller_file = file2 if size1 > size2 else file1
+            size_diff = abs(size1 - size2)
+            
+            ui.show_info(f"\nSuggestion : Supprimer {os.path.basename(bigger_file)}")
+            ui.show_info(f"Raison : Plus lourd de {ui.format_size(size_diff)}")
+            
+            if ui.confirm_action("Voulez-vous voir les images de ces fichiers ?"):
+                show_images((file1, file2), timecode)
+            
+            action = ui.prompt_input(
+                "Action (s: supprimer le plus lourd, k: garder les deux, i: ignorer, q: quitter) : ",
+                default="s"
+            ).lower()
+            
+            if action == 'q':
+                break
+            elif action == 'i':
+                ignored_duplicates.append((file1, file2))
+                save_ignored_duplicates(ignored_duplicates)
+                ui.show_info("Paire ignorée et sauvegardée")
+            elif action == 's':
+                try:
+                    send2trash(bigger_file)
+                    total_space += os.path.getsize(bigger_file)
+                    ui.show_success(f"Fichier déplacé vers la corbeille : {os.path.basename(bigger_file)}")
+                    ui.show_info(f"Fichier conservé : {os.path.basename(smaller_file)}")
+                except Exception as e:
+                    ui.show_error(f"Erreur lors de la suppression : {str(e)}")
+        
+        if total_space > 0:
+            ui.show_success(f"Espace total libéré : {ui.format_size(total_space)}")
+    else:
+        ui.show_info("Aucun doublon trouvé !")
+
+def show_images(duplicates: Tuple[str, str], timecode: float):
+    """Affiche des images des vidéos pour comparaison visuelle."""
     for path in duplicates:
-        console.print(f"Affichage d'une image pour : [bold cyan]{path}[/bold cyan] au temps {timecode}s")
-        display_image_from_video(path, timecode)
-
+        ui.show_info(f"Affichage d'une image pour : {os.path.basename(path)} au temps {timecode}s")
+        try:
+            display_image_from_video(path, timecode)
+        except Exception as e:
+            ui.show_error(f"Erreur lors de l'affichage de l'image pour {os.path.basename(path)}: {str(e)}")
